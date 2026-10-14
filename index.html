@@ -19,6 +19,7 @@ h1{font-size:18px;margin:0 0 6px}p{font-size:13px;margin:5px 0 12px;line-height:
   <h1>Bergmerke 3D · prototyp</h1>
   <p>Opnar Web Scene frå kart-vegvesen.maps.arcgis.com. Logg inn dersom ArcGIS ber om det.</p>
   <div class="buttons">
+    <button id="login">Logg inn med SSO</button>
     <button id="bolt" disabled>▲ Plasser bolt</button>
     <button id="navigate" class="active" disabled>Hand / naviger</button>
     <button id="undo" disabled>Angre siste</button>
@@ -33,6 +34,7 @@ h1{font-size:18px;margin:0 0 6px}p{font-size:13px;margin:5px 0 12px;line-height:
 'use strict';
 const ITEM_ID = 'fa7914fe23134a09a3c44483de2da30a';
 const PORTAL_URL = 'https://kart-vegvesen.maps.arcgis.com';
+const CLIENT_ID = '6jgJ7gpJHyIv5miA';
 const $ = (id) => document.getElementById(id);
 let mode = 'navigate', placed = [], view, annotations;
 const status = (txt) => $('status').textContent = txt;
@@ -48,15 +50,27 @@ $('save').onclick = () => {
   const a=document.createElement('a'); a.href=url;a.download='bergmerke-3d-boltar.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);
 };
 require([
-  'esri/WebScene', 'esri/views/SceneView', 'esri/layers/GraphicsLayer', 'esri/Graphic', 'esri/portal/Portal', 'esri/portal/PortalItem', 'esri/identity/IdentityManager'
-], function(WebScene,SceneView,GraphicsLayer,Graphic,Portal,PortalItem,esriId) {
+  'esri/WebScene', 'esri/views/SceneView', 'esri/layers/GraphicsLayer', 'esri/Graphic', 'esri/portal/Portal', 'esri/portal/PortalItem', 'esri/identity/IdentityManager', 'esri/identity/OAuthInfo'
+], function(WebScene,SceneView,GraphicsLayer,Graphic,Portal,PortalItem,esriId,OAuthInfo) {
+  esriId.registerOAuthInfos([new OAuthInfo({appId:CLIENT_ID,portalUrl:PORTAL_URL,flowType:'auto',popup:false})]);
+  const sharingUrl = PORTAL_URL + "/sharing";
+  $('login').onclick = () => {
+    status("Opnar SSO-pålogging …");
+    esriId.getCredential(sharingUrl).then(startScene).catch(error);
+  };
+  let started = false;
+  async function startScene(){
+    if(started)return;started=true;
+    $('login').hidden=true;
+    await loadScene();
+  }
   const portal = new Portal({url:PORTAL_URL});
   const scene = new WebScene({portalItem:new PortalItem({id:ITEM_ID,portal})});
   annotations = new GraphicsLayer({title:'Bergmerke – mellombelse boltar',elevationInfo:{mode:'absolute-height'}});
   view = new SceneView({container:'viewDiv',map:scene,popupEnabled:false,qualityProfile:'high'});
-  (async () => {
+  async function loadScene() {
     try {
-      status('Hentar sikra Web Scene. Eventuell pålogging kan kome i eige vindauge …');
+      status('Hentar sikra Web Scene …');
       await scene.load();
       await view.when();
       scene.add(annotations);
@@ -80,8 +94,12 @@ require([
           status(`Bolt ${placed.length} plassert. X: ${p.x.toFixed(2)}, Y: ${p.y.toFixed(2)}, Z: ${p.z.toFixed(2)} (SR: ${p.spatialReference?.wkid ?? 'ukjent'}). Kontroller visuelt at treffpunktet er på meshen.`);
         } catch(e) {error(e);}
       });
-    } catch(e) {error(e);status('Kunne ikkje opne scena. Sjå feilen over. Dersom du ikkje får innloggingsdialog, prøv lokal webserver og OAuth-oppsett.');}
-  })();
+    } catch(e) {error(e);status('Kunne ikkje opne scena. Kontroller tilgang til Web Scene og logg inn på nytt ved behov.');}
+  }
+  status('Kontrollerer SSO-innlogging …');
+  esriId.checkSignInStatus(sharingUrl).then(startScene).catch(() => {
+    status('Ikkje innlogga. Trykk «Logg inn med SSO».');
+  });
 });
 })();
 </script>
