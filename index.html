@@ -9,25 +9,30 @@
 html,body{margin:0;height:100%;font-family:system-ui,Segoe UI,Arial,sans-serif;color:#17352d}
 #viewDiv{position:absolute;inset:0}
 #panel{position:absolute;z-index:10;left:12px;top:12px;width:min(340px,calc(100vw - 48px));background:rgba(255,255,255,.94);box-shadow:0 5px 25px #0003;border-radius:12px;padding:16px}
-h1{font-size:18px;margin:0 0 6px}p{font-size:13px;margin:5px 0 12px;line-height:1.45}button{cursor:pointer;border:1px solid #97aca5;border-radius:8px;padding:9px 11px;background:#fff;font-weight:600;color:#17352d}button.active{background:#c92e31;color:white;border-color:#c92e31}button:disabled{opacity:.45;cursor:default}.buttons{display:flex;flex-wrap:wrap;gap:6px}.small{font-size:12px;white-space:pre-wrap;line-height:1.45}#status{margin:12px 0 0;background:#edf2ef;padding:8px;border-radius:6px}#error{margin-top:8px;color:#a41b24;word-break:break-word}#more{margin-top:10px;font-size:12px;color:#52665e}
+h1{font-size:18px;margin:0 0 6px}p{font-size:13px;margin:5px 0 12px;line-height:1.45}button{cursor:pointer;border:1px solid #97aca5;border-radius:8px;padding:9px 11px;background:#fff;font-weight:600;color:#17352d}button.active{background:#c92e31;color:white;border-color:#c92e31}button:disabled{opacity:.45;cursor:default}.slider-row{display:grid;grid-template-columns:24px 1fr 70px;align-items:center;gap:8px;margin:6px 0}.slider-row output{text-align:right;font-variant-numeric:tabular-nums}.slider-row input{width:100%;min-width:0}.buttons{display:flex;flex-wrap:wrap;gap:6px}.small{font-size:12px;white-space:pre-wrap;line-height:1.45}#status{margin:12px 0 0;background:#edf2ef;padding:8px;border-radius:6px}#error{margin-top:8px;color:#a41b24;word-break:break-word}#more{margin-top:10px;font-size:12px;color:#52665e}
 </style>
 <script src="https://js.arcgis.com/4.34/"></script>
 </head>
 <body>
 <div id="viewDiv"></div>
 <aside id="panel">
-  <h1>Bergmerke 3D · prototyp</h1>
+  <h1>Bergmerke 3D · kuler og XYZ</h1>
   <p>Opnar Web Scene frå kart-vegvesen.maps.arcgis.com. Logg inn dersom ArcGIS ber om det.</p>
   <div class="buttons">
     <button id="login">Logg inn med SSO</button>
-    <button id="bolt" disabled>▲ Plasser bolt</button>
+    <button id="bolt" disabled>● Plasser bolt</button>
     <button id="navigate" class="active" disabled>Hand / naviger</button>
     <button id="undo" disabled>Angre siste</button>
     <button id="save" disabled>Lagre JSON</button>
     <button id="zoomBolts" disabled>Zoom til boltar</button>
   </div>
-  <p style="margin:12px 0 3px"><label for="offset">Vis boltar over modellen: <strong id="offsetVal">3 m</strong></label></p>
-  <input id="offset" type="range" min="0" max="30" step="0.5" value="3" style="width:100%" title="Berre visingshøgd, endrar ikkje dei lagra koordinatane">
+  <p style="margin:12px 0 4px"><strong>Forskyv kuler i 3D</strong> (berre vising)</p>
+  <div class="slider-row"><label for="dx">X</label><input id="dx" type="range" min="-30" max="30" step="0.5" value="0"><output id="dxVal">0 m</output></div>
+  <div class="slider-row"><label for="dy">Y</label><input id="dy" type="range" min="-30" max="30" step="0.5" value="0"><output id="dyVal">0 m</output></div>
+  <div class="slider-row"><label for="dz">Z</label><input id="dz" type="range" min="-30" max="30" step="0.5" value="3"><output id="dzVal">3 m</output></div>
+  <div class="slider-row"><label for="diameter">Ø</label><input id="diameter" type="range" min="0.5" max="10" step="0.5" value="3"><output id="diameterVal">3 m</output></div>
+  <button id="resetOffsets" type="button">Nullstill forskyving</button>
+  <p class="small">X/Y er forskyving i kartkoordinatane (Web Mercator), Z er høgde. Ein kule har fysisk diameter i meter, ikkje skjermpikslar.</p>
   <div id="status" class="small">Lastar ArcGIS JavaScript SDK …</div>
   <div id="error" class="small"></div>
   <div id="more">Merk: Annotasjonane er berre i nettlesaren fram til du lagrar JSON. Denne testen endrar ikkje Web Scene eller Enterprise-data.</div>
@@ -39,16 +44,25 @@ const ITEM_ID = 'fa7914fe23134a09a3c44483de2da30a';
 const PORTAL_URL = 'https://kart-vegvesen.maps.arcgis.com';
 const CLIENT_ID = '6jgJ7gpJHyIv5miA';
 const $ = (id) => document.getElementById(id);
-let mode = 'navigate', placed = [], view, annotations;
+let mode = 'navigate', placed = [], visuals = [], view, annotations;
+const values=()=>({dx:Number($('dx').value),dy:Number($('dy').value),dz:Number($('dz').value),diameter:Number($('diameter').value)});
+const sphereSymbol=(diameter)=>({type:'point-3d',symbolLayers:[{type:'object',resource:{primitive:'sphere'},width:diameter,height:diameter,depth:diameter,material:{color:'#e00000'}}]});
+function updateVisuals(){
+  const {dx,dy,dz,diameter}=values();
+  for(const id of ['dx','dy','dz','diameter']) $(id+'Val').textContent=$(id).value+' m';
+  visuals.forEach((visual,i)=>{const base=placed[i]?.geometry;if(!base)return;const point=base.clone();point.x=base.x+dx;point.y=base.y+dy;point.z=base.z+dz;visual.geometry=point;visual.symbol=sphereSymbol(diameter);});
+}
+
 const status = (txt) => $('status').textContent = txt;
 const error = (e) => { console.error(e); $('error').textContent = 'Feil: ' + (e?.message || String(e)); };
 const enable = () => { $('bolt').disabled = false; $('navigate').disabled = false; $('save').disabled = !placed.length; $('undo').disabled = !placed.length; $('zoomBolts').disabled = !placed.length; };
 const changeMode = (m) => { mode = m; $('bolt').classList.toggle('active',m==='bolt'); $('navigate').classList.toggle('active',m==='navigate'); if(view) view.container.style.cursor = m==='bolt' ? 'crosshair':'default'; status(m==='bolt' ? 'Klikk på bergflata for å plassere ein bolt.' : 'Naviger i modellen. Vel «Plasser bolt» for annotering.'); };
 $('bolt').onclick = () => changeMode('bolt');
 $('navigate').onclick = () => changeMode('navigate');
-$('undo').onclick = () => { const g=placed.pop(); if(g) annotations.remove(g); enable(); status(`${placed.length} bolt(ar) står att.`); };
-$('offset').oninput = () => { const offset=Number($('offset').value); $('offsetVal').textContent=offset+' m'; if(annotations) annotations.elevationInfo = {mode:'absolute-height',offset}; };
-$('zoomBolts').onclick = async () => { if(!view || !placed.length)return; try { await view.goTo({target:placed.map(g=>g.geometry),scale:600}, {duration:900}); } catch(e) {error(e);} };
+$('undo').onclick = () => { placed.pop();const visual=visuals.pop();if(visual) annotations.remove(visual);enable();status(`${placed.length} bolt(ar) står att.`); };
+for(const id of ['dx','dy','dz','diameter']) $(id).addEventListener('input',updateVisuals);
+$('resetOffsets').onclick=()=>{for(const id of ['dx','dy','dz']) $(id).value=0;updateVisuals();};
+$('zoomBolts').onclick = async () => { if(!view || !placed.length)return; try { await view.goTo({target:visuals.map(g=>g.geometry),scale:600}, {duration:900}); } catch(e) {error(e);} };
 $('save').onclick = () => {
   const result = {format:'Bergmerke3D',version:1,websceneId:ITEM_ID,portal:PORTAL_URL,exportedAt:new Date().toISOString(),graphics:placed.map(g=>g.toJSON())};
   const url = URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:'application/json'}));
@@ -71,7 +85,7 @@ require([
   }
   const portal = new Portal({url:PORTAL_URL});
   const scene = new WebScene({portalItem:new PortalItem({id:ITEM_ID,portal})});
-  annotations = new GraphicsLayer({title:'Bergmerke – mellombelse boltar',elevationInfo:{mode:'absolute-height',offset:3}});
+  annotations = new GraphicsLayer({title:'Bergmerke – mellombelse boltar',elevationInfo:{mode:'absolute-height'}});
   view = new SceneView({container:'viewDiv',map:scene,popupEnabled:false,qualityProfile:'high'});
   async function loadScene() {
     try {
@@ -92,11 +106,11 @@ require([
           if(!p || !Number.isFinite(p.z)) {status('Ingen 3D-treff. Prøv å klikke direkte på modellen.');return;}
           const g = new Graphic({
             geometry:p.clone(),
-            symbol:{type:'point-3d',symbolLayers:[{type:'icon',resource:{primitive:'triangle'},size:30,material:{color:'#e00000'},outline:{color:'#ffffff',size:2}}]},
+            symbol:sphereSymbol(values().diameter),
             attributes:{category:'bolt',index:placed.length+1,createdAt:new Date().toISOString()}
           });
-          annotations.add(g);placed.push(g);enable();
-          status(`Bolt ${placed.length} plassert. X: ${p.x.toFixed(2)}, Y: ${p.y.toFixed(2)}, Z: ${p.z.toFixed(2)} (SR: ${p.spatialReference?.wkid ?? 'ukjent'}). Visingshøgd: ${$('offset').value} m. Prøv å auke visingshøgda dersom symbolet er skjult av meshen.`);
+          placed.push(g);const visual=g.clone();visuals.push(visual);annotations.add(visual);updateVisuals();enable();
+          status(`Bolt ${placed.length} plassert. X: ${p.x.toFixed(2)}, Y: ${p.y.toFixed(2)}, Z: ${p.z.toFixed(2)} (SR: ${p.spatialReference?.wkid ?? 'ukjent'}). Visingsforskyving: X=${values().dx}, Y=${values().dy}, Z=${values().dz} m. Juster X/Y/Z om kula er skjult av bergflata.`);
         } catch(e) {error(e);}
       });
     } catch(e) {error(e);status('Kunne ikkje opne scena. Kontroller tilgang til Web Scene og logg inn på nytt ved behov.');}
