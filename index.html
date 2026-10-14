@@ -24,7 +24,10 @@ h1{font-size:18px;margin:0 0 6px}p{font-size:13px;margin:5px 0 12px;line-height:
     <button id="navigate" class="active" disabled>Hand / naviger</button>
     <button id="undo" disabled>Angre siste</button>
     <button id="save" disabled>Lagre JSON</button>
+    <button id="zoomBolts" disabled>Zoom til boltar</button>
   </div>
+  <p style="margin:12px 0 3px"><label for="offset">Vis boltar over modellen: <strong id="offsetVal">3 m</strong></label></p>
+  <input id="offset" type="range" min="0" max="30" step="0.5" value="3" style="width:100%" title="Berre visingshøgd, endrar ikkje dei lagra koordinatane">
   <div id="status" class="small">Lastar ArcGIS JavaScript SDK …</div>
   <div id="error" class="small"></div>
   <div id="more">Merk: Annotasjonane er berre i nettlesaren fram til du lagrar JSON. Denne testen endrar ikkje Web Scene eller Enterprise-data.</div>
@@ -39,11 +42,13 @@ const $ = (id) => document.getElementById(id);
 let mode = 'navigate', placed = [], view, annotations;
 const status = (txt) => $('status').textContent = txt;
 const error = (e) => { console.error(e); $('error').textContent = 'Feil: ' + (e?.message || String(e)); };
-const enable = () => { $('bolt').disabled = false; $('navigate').disabled = false; $('save').disabled = !placed.length; $('undo').disabled = !placed.length; };
+const enable = () => { $('bolt').disabled = false; $('navigate').disabled = false; $('save').disabled = !placed.length; $('undo').disabled = !placed.length; $('zoomBolts').disabled = !placed.length; };
 const changeMode = (m) => { mode = m; $('bolt').classList.toggle('active',m==='bolt'); $('navigate').classList.toggle('active',m==='navigate'); if(view) view.container.style.cursor = m==='bolt' ? 'crosshair':'default'; status(m==='bolt' ? 'Klikk på bergflata for å plassere ein bolt.' : 'Naviger i modellen. Vel «Plasser bolt» for annotering.'); };
 $('bolt').onclick = () => changeMode('bolt');
 $('navigate').onclick = () => changeMode('navigate');
 $('undo').onclick = () => { const g=placed.pop(); if(g) annotations.remove(g); enable(); status(`${placed.length} bolt(ar) står att.`); };
+$('offset').oninput = () => { const offset=Number($('offset').value); $('offsetVal').textContent=offset+' m'; if(annotations) annotations.elevationInfo = {mode:'absolute-height',offset}; };
+$('zoomBolts').onclick = async () => { if(!view || !placed.length)return; try { await view.goTo({target:placed.map(g=>g.geometry),scale:600}, {duration:900}); } catch(e) {error(e);} };
 $('save').onclick = () => {
   const result = {format:'Bergmerke3D',version:1,websceneId:ITEM_ID,portal:PORTAL_URL,exportedAt:new Date().toISOString(),graphics:placed.map(g=>g.toJSON())};
   const url = URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:'application/json'}));
@@ -66,7 +71,7 @@ require([
   }
   const portal = new Portal({url:PORTAL_URL});
   const scene = new WebScene({portalItem:new PortalItem({id:ITEM_ID,portal})});
-  annotations = new GraphicsLayer({title:'Bergmerke – mellombelse boltar',elevationInfo:{mode:'absolute-height'}});
+  annotations = new GraphicsLayer({title:'Bergmerke – mellombelse boltar',elevationInfo:{mode:'absolute-height',offset:3}});
   view = new SceneView({container:'viewDiv',map:scene,popupEnabled:false,qualityProfile:'high'});
   async function loadScene() {
     try {
@@ -87,11 +92,11 @@ require([
           if(!p || !Number.isFinite(p.z)) {status('Ingen 3D-treff. Prøv å klikke direkte på modellen.');return;}
           const g = new Graphic({
             geometry:p.clone(),
-            symbol:{type:'point-3d',symbolLayers:[{type:'icon',resource:{primitive:'triangle'},size:18,material:{color:'#e00000'},outline:{color:'#ffffff',size:1.3}}]},
+            symbol:{type:'point-3d',symbolLayers:[{type:'icon',resource:{primitive:'triangle'},size:30,material:{color:'#e00000'},outline:{color:'#ffffff',size:2}}]},
             attributes:{category:'bolt',index:placed.length+1,createdAt:new Date().toISOString()}
           });
           annotations.add(g);placed.push(g);enable();
-          status(`Bolt ${placed.length} plassert. X: ${p.x.toFixed(2)}, Y: ${p.y.toFixed(2)}, Z: ${p.z.toFixed(2)} (SR: ${p.spatialReference?.wkid ?? 'ukjent'}). Kontroller visuelt at treffpunktet er på meshen.`);
+          status(`Bolt ${placed.length} plassert. X: ${p.x.toFixed(2)}, Y: ${p.y.toFixed(2)}, Z: ${p.z.toFixed(2)} (SR: ${p.spatialReference?.wkid ?? 'ukjent'}). Visingshøgd: ${$('offset').value} m. Prøv å auke visingshøgda dersom symbolet er skjult av meshen.`);
         } catch(e) {error(e);}
       });
     } catch(e) {error(e);status('Kunne ikkje opne scena. Kontroller tilgang til Web Scene og logg inn på nytt ved behov.');}
